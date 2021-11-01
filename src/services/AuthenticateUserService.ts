@@ -1,6 +1,11 @@
+import { IUserRepository } from '../data/UserRepository';
+import { inject, injectable } from 'tsyringe';
 import axios from "axios";
 import { sign } from "jsonwebtoken";
-import prismaClient from "../prisma";
+
+interface IAuthenticateUserService { 
+    execute(code: string)
+}
 
 interface IAccessTokenResponse {
     access_token: string
@@ -13,10 +18,32 @@ interface IUserResponse {
     name: string
 }
 
-class AuthenticateUserService {
+@injectable()
+class AuthenticateUserService implements IAuthenticateUserService {
+
+    constructor(
+        @inject("UserRepository")
+        private repository: IUserRepository
+    ) {}
+    
     async execute(code: string) {
 
         // Get Access Token
+        const userGitHub = await this.getUserInfoFromGitHub(code);
+
+        let user = await this.repository.getByGithubId(userGitHub.id);
+
+        if (!user) {
+           await this.repository.create(userGitHub, userGitHub.login, userGitHub.avatar_url, userGitHub.name);
+        }
+
+        const token = await this.signToken(user);
+
+        return { token, user }
+    }
+
+    private async getUserInfoFromGitHub(code) {
+
         const url = "https://github.com/login/oauth/access_token";
         const { data: accessTokenResponse } = await axios.post<IAccessTokenResponse>(url, null, {
             params: {
@@ -35,41 +62,29 @@ class AuthenticateUserService {
             }
         })
 
-        const {login, id, avatar_url, name} = response.data
+        return response.data;
 
-        let user = await prismaClient.user.findFirst({
-            where: {
-                github_id: id
-            }
-        })
+    }
 
-        if (!user) {
-            await prismaClient.user.create({
-                data: {
-                    github_id: id,
-                    login,
-                    avatar_url,
-                    name
-                }
-            })
-        }
+    private async signToken(user) {
 
         const token = sign(
-        {
-            user: {
-                name: user.name,
-                avatar_url: user.avatar_url,
-                id: user.id
-            }
-        }, process.env.JWT_SECRET,
-        {
-            subject: user.id,
-            expiresIn: "1d"
-        });
+            {
+                user: {
+                    name: user.name,
+                    avatar_url: user.avatar_url,
+                    id: user.id
+                }
+            }, process.env.JWT_SECRET,
+            {
+                subject: user.id,
+                expiresIn: "1d"
+            });
+        
+        return token;
 
-        return { token, user }
     }
 
 }
 
-export { AuthenticateUserService }
+export { AuthenticateUserService, IAuthenticateUserService }

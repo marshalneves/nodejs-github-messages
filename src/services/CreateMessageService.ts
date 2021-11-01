@@ -1,19 +1,28 @@
+import { inject, injectable } from "tsyringe";
 import { io } from "../app";
-import prismaClient from "../prisma";
+import { IMessageRepository } from "../data/MessageRepository";
+import prismaClient from "../data/prisma";
+interface ICreateMessageService { 
+    execute(text: string, user_id: string)
+}
 
+@injectable()
+class CreateMessageService implements ICreateMessageService {
 
-class CreateMessageService {
+    constructor(
+        @inject("MessageRepository")
+        private repository: IMessageRepository
+        
+    ) { }
+
     async execute(text: string, user_id: string) {
-        const message = await prismaClient.message.create({
-            data:{
-                text,
-                user_id
-            },
-            include: {
-                user: true
-            }
-        });
 
+        const message = await this.repository.create(text, user_id);       
+        this.sendMessage(message);
+        return message
+    }
+
+    async sendMessage(message) {
         const infoWS = {
             text: message.text,
             user_id: message.user_id,
@@ -24,10 +33,7 @@ class CreateMessageService {
             }
         }
         io.emit("new_message", infoWS);
-
-
-        return message
     }
 }
 
-export {CreateMessageService};
+export { CreateMessageService, ICreateMessageService };
